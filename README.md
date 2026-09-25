@@ -20,6 +20,9 @@ onto a workspace to move it there without leaving where you are.
 - **Workspace strip grouped by screen.** Drag a card onto a workspace, or press
   Alt+1..9, to move the window there. You stay where you are and Filmstrip stays
   open. Click a workspace to switch to it. Each slot shows the icons of the apps on it.
+  When every workspace of a screen already has an app, that screen gets one
+  extra empty slot (marked `+`). Dropping a window there creates the workspace
+  on that screen.
 - **Search as you type** by app, title or workspace (`ws3`). Every word has to match.
 - Follows the active Omarchy theme and fonts.
 

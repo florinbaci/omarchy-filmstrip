@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.florinbaci.filmstrip",
   "name": "Filmstrip",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "florinbaci",
   "license": "MIT",
   "description": "Every open window in one row with live previews and app icons. Switch to one, or drag it onto a workspace grouped by screen.",

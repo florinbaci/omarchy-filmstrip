@@ -298,12 +298,16 @@ Item {
 
   // Send a window to a workspace without following it. Filmstrip stays open
   // and refreshes, so the card's tag and the strip show the result.
-  function moveToWorkspace(address, workspaceId) {
+  // pinToMonitor: for a new workspace (the strip's extra slot), which Hyprland
+  // would otherwise create on the focused screen rather than the one dropped on.
+  function moveToWorkspace(address, workspaceId, pinToMonitor) {
     var a = root.normalizeAddress(address)
     if (!a || !(workspaceId > 0)) return
     root.userMoved = true
-    Quickshell.execDetached(["hyprctl", "eval",
-      'hl.dispatch(hl.dsp.window.move({ workspace = "' + workspaceId + '", follow = false, window = "address:' + a + '" }))'])
+    var script = 'hl.dispatch(hl.dsp.window.move({ workspace = "' + workspaceId + '", follow = false, window = "address:' + a + '" }))'
+    if (pinToMonitor)
+      script += '; hl.dispatch(hl.dsp.workspace.move({ workspace = "' + workspaceId + '", monitor = "' + pinToMonitor + '" }))'
+    Quickshell.execDetached(["hyprctl", "eval", script])
     moveRefresh.restart()
   }
 
@@ -820,7 +824,8 @@ Item {
                 radius: Style.space(12)
                 color: drop.containsDrag
                   ? Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.35)
-                  : Qt.rgba(root.background.r, root.background.g, root.background.b, slot.hovered ? 0.95 : 0.8)
+                  : Qt.rgba(root.background.r, root.background.g, root.background.b,
+                      slot.modelData.extra ? (slot.hovered ? 0.6 : 0.35) : (slot.hovered ? 0.95 : 0.8))
                 border.width: drop.containsDrag || slot.modelData.active ? Style.space(2) : 1
                 border.color: drop.containsDrag || slot.modelData.active
                   ? root.accent
@@ -834,8 +839,8 @@ Item {
                   anchors.top: parent.top
                   anchors.leftMargin: Style.space(10)
                   anchors.topMargin: Style.space(6)
-                  text: slot.modelData.id
-                  color: slot.modelData.active ? root.accent : root.foreground
+                  text: slot.modelData.extra ? slot.modelData.id + "  +" : slot.modelData.id
+                  color: slot.modelData.active ? root.accent : (slot.modelData.extra ? root.muted : root.foreground)
                   font.family: root.fontFamily
                   font.pixelSize: Style.font.body
                   font.bold: true
@@ -877,7 +882,8 @@ Item {
                   anchors.fill: parent
                   keys: ["filmstrip-window"]
                   onDropped: function(dropEvent) {
-                    root.moveToWorkspace(dragProxy.address, slot.modelData.id)
+                    root.moveToWorkspace(dragProxy.address, slot.modelData.id,
+                      slot.modelData.extra ? slot.modelData.monitor : "")
                     dropEvent.accept()
                   }
                 }

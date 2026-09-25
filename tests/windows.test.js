@@ -137,8 +137,35 @@ test("workspaceStrip groups ruled and existing workspaces by screen", () => {
   const strip = W.workspaceStrip(rules, existing, monitors, windows)
   assert.deepEqual(strip.map(g => g.monitor), ["HDMI-A-1", "DP-2"])
   assert.deepEqual(strip[0].slots.map(s => s.id), [1, 2, 9])
-  assert.deepEqual(strip[1].slots.map(s => s.id), [5])
+  // DP-2's only workspace has windows, so it also gets an extra empty slot
+  // with the lowest unused number.
+  assert.deepEqual(strip[1].slots.map(s => s.id), [5, 3])
+  assert.equal(strip[1].slots[1].extra, true)
   assert.deepEqual(strip[1].slots[0].apps, ["foot", "brave"])
   assert.equal(strip[0].slots[0].active, true)
   assert.equal(strip[0].slots[1].active, false)
+})
+
+test("workspaceStrip adds one empty slot to a screen whose workspaces are all in use", () => {
+  const rules = [1, 2, 3, 4].map(n => ({ workspaceString: String(n), monitor: "HDMI-A-1" }))
+    .concat([5, 6, 7, 8].map(n => ({ workspaceString: String(n), monitor: "DP-2" })))
+  const monitors = [{ name: "HDMI-A-1", x: 0, activeWorkspaceId: 1 }, { name: "DP-2", x: 1536, activeWorkspaceId: 5 }]
+  const full = [1, 2, 3, 4].map(n => ({ workspaceId: n, className: "app" + n }))
+  let strip = W.workspaceStrip(rules, [], monitors, full)
+  assert.deepEqual(strip[0].slots.map(s => s.id), [1, 2, 3, 4, 9]) // 5-8 belong to DP-2
+  assert.equal(strip[0].slots[4].extra, true)
+  assert.equal(strip[0].slots[4].monitor, "HDMI-A-1")
+  assert.equal(strip[1].slots.length, 4) // DP-2 still has empty workspaces
+  assert.ok(strip[1].slots.every(s => !s.extra))
+
+  // Both screens full: each gets its own, different extra slot.
+  const both = full.concat([5, 6, 7, 8].map(n => ({ workspaceId: n, className: "b" + n })))
+  strip = W.workspaceStrip(rules, [], monitors, both)
+  assert.equal(strip[0].slots[4].id, 9)
+  assert.equal(strip[1].slots[4].id, 10)
+
+  // An existing workspace 9 on HDMI-A-1 that is full too: the next free is 10.
+  const nine = full.concat([{ workspaceId: 9, className: "c" }])
+  strip = W.workspaceStrip(rules, [{ id: 9, monitorName: "HDMI-A-1" }], monitors, nine)
+  assert.deepEqual(strip[0].slots.map(s => s.id), [1, 2, 3, 4, 9, 10])
 })
