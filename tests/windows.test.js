@@ -174,3 +174,36 @@ test("workspaceStrip adds one empty slot to a screen whose workspaces are all in
   strip = W.workspaceStrip(rules, [{ id: 9, monitorName: "HDMI-A-1" }], monitors, nine)
   assert.deepEqual(strip[0].slots.map(s => s.id), [1, 2, 3, 4, 9, 10])
 })
+
+test("swapWorkspacesLua moves each side's windows to the other workspace", () => {
+  const lua = W.swapWorkspacesLua(3, ["0xa", "b"], 5, ["0xc"])
+  const moves = lua.split("; ")
+  assert.equal(moves.length, 3)
+  assert.match(moves[0], /workspace = "5".*address:0xa/)
+  assert.match(moves[1], /workspace = "5".*address:0xb/)
+  assert.match(moves[2], /workspace = "3".*address:0xc/)
+  assert.ok(moves.every(m => m.includes("follow = false")))
+  // Swapping with an empty workspace just moves one side.
+  assert.equal(W.swapWorkspacesLua(3, ["0xa"], 9, []).split("; ").length, 1)
+  // Same workspace, or no valid target: nothing to do.
+  assert.equal(W.swapWorkspacesLua(3, ["0xa"], 3, ["0xa"]), "")
+  assert.equal(W.swapWorkspacesLua(3, ["0xa"], 0, []), "")
+})
+
+test("compactMoves fills gaps per screen and leaves packed screens alone", () => {
+  const rules = [1, 2, 3, 4].map(n => ({ workspaceString: String(n), monitor: "HDMI-A-1" }))
+    .concat([5, 6, 7, 8, 9].map(n => ({ workspaceString: String(n), monitor: "DP-2" })))
+  const monitors = [{ name: "HDMI-A-1", x: 0, activeWorkspaceId: 1 }, { name: "DP-2", x: 1536, activeWorkspaceId: 5 }]
+  const win = (ws, address) => ({ workspaceId: ws, className: "app", address })
+  // HDMI: 1,2,3 used, 4 empty (no gap). DP-2: 7 empty between 6 and 8.
+  const windows = [win(1, "a"), win(2, "b"), win(3, "c"), win(5, "t"), win(6, "w"), win(8, "b1"), win(8, "b2"), win(9, "b3")]
+  const moves = W.compactMoves(W.workspaceStrip(rules, [], monitors, windows))
+  assert.deepEqual(moves, [
+    { address: "b1", workspaceId: 7 }, { address: "b2", workspaceId: 7 }, { address: "b3", workspaceId: 8 }
+  ])
+  // Already packed: nothing to do, and the extra "+" slot is never a target.
+  const packed = [win(1, "a"), win(2, "b"), win(3, "c"), win(4, "d")]
+  assert.deepEqual(W.compactMoves(W.workspaceStrip(rules, [], monitors, packed)), [])
+  // Gap at the start of a screen.
+  assert.deepEqual(W.compactMoves(W.workspaceStrip(rules, [], monitors, [win(3, "x")])), [{ address: "x", workspaceId: 1 }])
+})

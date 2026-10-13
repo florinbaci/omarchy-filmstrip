@@ -259,6 +259,51 @@ function workspaceStrip(rules, workspaces, monitors, windows) {
   return groups
 }
 
+// Hyprland Lua that swaps the windows of two workspaces: everything on
+// fromId goes to toId and everything on toId goes to fromId, without
+// following. Addresses are taken before anything moves, so each window
+// moves exactly once.
+function swapWorkspacesLua(fromId, fromAddresses, toId, toAddresses) {
+  var parts = []
+  function moveAll(addresses, target) {
+    for (var i = 0; i < (addresses || []).length; i++) {
+      var a = String(addresses[i] || "").trim()
+      if (!a) continue
+      if (a.indexOf("0x") !== 0) a = "0x" + a
+      parts.push('hl.dispatch(hl.dsp.window.move({ workspace = "' + target + '", follow = false, window = "address:' + a + '" }))')
+    }
+  }
+  if (!(fromId > 0) || !(toId > 0) || fromId === toId) return ""
+  moveAll(fromAddresses, toId)
+  moveAll(toAddresses, fromId)
+  return parts.join("; ")
+}
+
+// Window moves that close the gaps in each screen's workspaces: the occupied
+// workspaces of a screen take that screen's lowest workspace numbers, in
+// order, so empty ones end up last. groups is workspaceStrip's output; extra
+// slots are left alone. Returns [{ address, workspaceId }], only for windows
+// that actually move. Windows never change screen.
+function compactMoves(groups) {
+  var moves = []
+  for (var g = 0; g < (groups || []).length; g++) {
+    var slots = []
+    for (var s = 0; s < groups[g].slots.length; s++) {
+      if (!groups[g].slots[s].extra) slots.push(groups[g].slots[s])
+    }
+    slots.sort(function(a, b) { return a.id - b.id })
+    var next = 0
+    for (var k = 0; k < slots.length; k++) {
+      var wins = slots[k].windows || []
+      if (wins.length === 0) continue
+      var target = slots[next++].id
+      if (target === slots[k].id) continue
+      for (var w = 0; w < wins.length; w++) moves.push({ address: wins[w].address, workspaceId: target })
+    }
+  }
+  return moves
+}
+
 // Arrow-key movement in a grid of `count` items laid out in `columns`.
 // Left/right wrap across rows; up/down keep the column and clamp to the
 // last item in a short final row.
@@ -286,6 +331,8 @@ if (typeof module !== "undefined") {
     moveIndex: moveIndex,
     rowLayout: rowLayout,
     workspaceStrip: workspaceStrip,
+    swapWorkspacesLua: swapWorkspacesLua,
+    compactMoves: compactMoves,
     isScratchpad: isScratchpad,
     aspectOf: aspectOf
   }

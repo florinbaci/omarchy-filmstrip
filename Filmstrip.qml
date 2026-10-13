@@ -33,6 +33,11 @@ Item {
   property var workspaceRules: []
   // Address of the window being dragged, "" when not dragging.
   property string dragAddress: ""
+  // Workspace tile being dragged (to swap with another), 0 when not dragging.
+  property int dragWorkspace: 0
+  readonly property bool dragging: root.dragAddress !== "" || root.dragWorkspace > 0
+  // Set by a move or swap: once it has landed, close the gaps it left.
+  property bool compactPending: false
 
   property color background: Color.menu.background
   property color foreground: Color.menu.text
@@ -299,6 +304,16 @@ Item {
     dragProxy.icon = icon
     dragProxy.address = address
     dragProxy.fromWorkspace = workspaceId
+    dragProxy.fromAddresses = []
+  }
+
+  // Start dragging a whole workspace tile, to swap it with another.
+  function prepareWorkspaceDrag(p, slotData) {
+    var first = (slotData.icons || [])[0] || {}
+    root.prepareDrag(p, "", "Workspace " + slotData.id, String(first.source || ""), slotData.id)
+    var addresses = []
+    for (var i = 0; i < slotData.windows.length; i++) addresses.push(slotData.windows[i].address)
+    dragProxy.fromAddresses = addresses
   }
 
   function closeWindow(index) {
@@ -332,6 +347,37 @@ Item {
     if (pinToMonitor)
       script += '; hl.dispatch(hl.dsp.workspace.move({ workspace = "' + workspaceId + '", monitor = "' + pinToMonitor + '" }))'
     Quickshell.execDetached(["hyprctl", "eval", script])
+    root.compactPending = true
+    moveRefresh.restart()
+  }
+
+  // Swap the windows of two workspaces (drag one tile onto another).
+  // pinToMonitor: as in moveToWorkspace, for the strip's extra slot.
+  function swapWorkspaces(fromId, fromAddresses, toSlot) {
+    var toAddresses = []
+    for (var i = 0; i < toSlot.windows.length; i++) toAddresses.push(toSlot.windows[i].address)
+    var script = Windows.swapWorkspacesLua(fromId, fromAddresses, toSlot.id, toAddresses)
+    if (!script) return
+    if (toSlot.extra)
+      script += '; hl.dispatch(hl.dsp.workspace.move({ workspace = "' + toSlot.id + '", monitor = "' + toSlot.monitor + '" }))'
+    root.userMoved = true
+    Quickshell.execDetached(["hyprctl", "eval", script])
+    root.compactPending = true
+    moveRefresh.restart()
+  }
+
+  // Close gaps in each screen's workspaces left by a move or swap: windows on
+  // later workspaces shift down, so the empty ones end up last.
+  function compactWorkspaces() {
+    root.compactPending = false
+    var moves = Windows.compactMoves(root.workspaceGroups)
+    if (moves.length === 0) return
+    var parts = []
+    for (var i = 0; i < moves.length; i++) {
+      var a = root.normalizeAddress(moves[i].address)
+      if (a) parts.push('hl.dispatch(hl.dsp.window.move({ workspace = "' + moves[i].workspaceId + '", follow = false, window = "address:' + a + '" }))')
+    }
+    Quickshell.execDetached(["hyprctl", "eval", parts.join("; ")])
     moveRefresh.restart()
   }
 
@@ -382,7 +428,11 @@ Item {
   Timer {
     id: settleTimer
     interval: 250
-    onTriggered: if (root.opened) root.rebuild(!root.userMoved && !root.filterText)
+    onTriggered: {
+      if (!root.opened) return
+      root.rebuild(!root.userMoved && !root.filterText)
+      if (root.compactPending) root.compactWorkspaces()
+    }
   }
 
   // After a move, refresh the IPC snapshot, then rebuild once it has landed.
@@ -852,6 +902,7 @@ Item {
                   ? root.accent
                   : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.16)
                 scale: drop.containsDrag ? 1.08 : 1.0
+                opacity: root.dragWorkspace === slot.modelData.id ? 0.35 : 1.0
 
                 Behavior on scale { NumberAnimation { duration: 100 } }
 
@@ -887,7 +938,7 @@ Item {
                       source: modelData.source
                       name: modelData.name
                       opacity: root.dragAddress && root.dragAddress === modelData.address ? 0.35 : 1.0
-                      scale: iconMouse.containsMouse && !root.dragAddress ? 1.25 : 1.0
+                      scale: iconMouse.containsMouse && !root.dragging ? 1.25 : 1.0
 
                       Behavior on scale { NumberAnimation { duration: 100 } }
 
@@ -946,16 +997,39 @@ Item {
                   onDropped: function(dropEvent) {
                     dropEvent.accept()
                     if (dragProxy.fromWorkspace === slot.modelData.id) return
-                    root.moveToWorkspace(dragProxy.address, slot.modelData.id,
-                      slot.modelData.extra ? slot.modelData.monitor : "")
+                    if (root.dragWorkspace > 0)
+                      root.swapWorkspaces(dragProxy.fromWorkspace, dragProxy.fromAddresses, slot.modelData)
+                    else
+                      root.moveToWorkspace(dragProxy.address, slot.modelData.id,
+                        slot.modelData.extra ? slot.modelData.monitor : "")
                   }
                 }
 
+                // Click to switch to the workspace; drag onto another tile to
+                // swap their windows. Empty tiles can only be dropped on.
                 MouseArea {
                   id: slotMouse
                   anchors.fill: parent
                   hoverEnabled: true
-                  onClicked: root.switchToWorkspace(slot.modelData.id)
+                  drag.target: slot.modelData.windows.length > 0 ? dragProxy : null
+                  drag.threshold: Style.space(8)
+                  property bool wasDragged: false
+
+                  onPressed: function(mouse) {
+                    wasDragged = false
+                    root.prepareWorkspaceDrag(slot.mapToItem(overlay, mouse.x, mouse.y), slot.modelData)
+                  }
+                  onPositionChanged: {
+                    if (drag.active && !wasDragged) {
+                      wasDragged = true
+                      root.dragWorkspace = slot.modelData.id
+                    }
+                  }
+                  onReleased: {
+                    if (wasDragged) dragProxy.Drag.drop()
+                    root.dragWorkspace = 0
+                  }
+                  onClicked: if (!wasDragged) root.switchToWorkspace(slot.modelData.id)
                 }
               }
             }
@@ -964,15 +1038,17 @@ Item {
       }
     }
 
-    // Floating copy of the card being dragged.
+    // Floating copy of the card, icon or workspace being dragged.
     Rectangle {
       id: dragProxy
       property string address: ""
       property string appName: ""
       property string icon: ""
       property int fromWorkspace: 0
+      // Windows of the workspace being dragged (workspace swaps only).
+      property var fromAddresses: []
 
-      visible: root.dragAddress !== ""
+      visible: root.dragging
       width: Style.space(200)
       height: Style.space(56)
       radius: height / 2
@@ -981,7 +1057,7 @@ Item {
       border.width: Style.space(2)
       border.color: root.accent
 
-      Drag.active: root.dragAddress !== ""
+      Drag.active: root.dragging
       Drag.keys: ["filmstrip-window"]
       Drag.hotSpot.x: width / 2
       Drag.hotSpot.y: height / 2
@@ -1014,7 +1090,7 @@ Item {
       anchors.bottom: parent.bottom
       anchors.bottomMargin: Style.space(24)
       anchors.horizontalCenter: parent.horizontalCenter
-      text: "←→ move  ·  Enter switch  ·  drag a card or a workspace's icon onto a workspace, or Alt+1–9, to move it  ·  Del close  ·  type to search  ·  Esc"
+      text: "←→ move  ·  Enter switch  ·  drag a card or icon onto a workspace (Alt+1–9) to move it  ·  drag a workspace onto another to swap  ·  Del close  ·  type to search  ·  Esc"
       color: root.muted
       font.family: root.fontFamily
       font.pixelSize: Style.font.caption
