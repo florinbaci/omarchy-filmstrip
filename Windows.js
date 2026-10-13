@@ -204,6 +204,8 @@ function rowLayout(n, width, height, gap, aspect, captionH, fitCount, maxCardW) 
 // workspaces: [{ id, monitorName }] that exist right now
 // monitors:   [{ name, x, activeWorkspaceId }]
 // windows:    rows from collectWindows (for per-workspace app lists)
+// Each slot lists its apps (class names) and its windows ({ address, className })
+// so the strip's icons can be dragged to another workspace.
 // Named and special workspaces are left out; the target is a workspace number.
 // When every workspace of a screen already holds a window, that screen gets
 // one extra empty slot (extra: true) with the lowest unused workspace number,
@@ -239,16 +241,19 @@ function workspaceStrip(rules, workspaces, monitors, windows) {
     var slots = []
     for (var s = 0; s < ids.length; s++) {
       var apps = []
+      var wins = []
       for (var w = 0; w < (windows || []).length; w++) {
-        if (windows[w].workspaceId === ids[s]) apps.push(windows[w].className)
+        if (windows[w].workspaceId !== ids[s]) continue
+        apps.push(windows[w].className)
+        wins.push({ address: String(windows[w].address || ""), className: windows[w].className })
       }
-      slots.push({ id: ids[s], apps: apps, active: ids[s] === m.activeWorkspaceId, extra: false, monitor: m.name })
+      slots.push({ id: ids[s], apps: apps, windows: wins, active: ids[s] === m.activeWorkspaceId, extra: false, monitor: m.name })
     }
     var full = slots.length > 0
     for (var f = 0; f < slots.length; f++) {
       if (slots[f].apps.length === 0) full = false
     }
-    if (full) slots.push({ id: nextFree(), apps: [], active: false, extra: true, monitor: m.name })
+    if (full) slots.push({ id: nextFree(), apps: [], windows: [], active: false, extra: true, monitor: m.name })
     groups.push({ monitor: m.name, slots: slots })
   }
   return groups

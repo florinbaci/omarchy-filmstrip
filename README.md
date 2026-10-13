@@ -23,6 +23,9 @@ onto a workspace to move it there without leaving where you are.
   When every workspace of a screen already has an app, that screen gets one
   extra empty slot (marked `+`). Dropping a window there creates the workspace
   on that screen.
+- **Rearrange from the strip itself.** Drag an app icon from one workspace slot
+  to another to move that window, without going through the cards. Click an
+  icon to switch to that window, middle-click to close it.
 - **Search as you type** by app, title or workspace (`ws3`). Every word has to match.
 - Follows the active Omarchy theme and fonts.
 
@@ -90,7 +93,8 @@ hl.bind("SUPER + SUPER_R", filmstrip_on_tap, { release = true, ignore_mods = tru
 | --- | --- |
 | Left / Right, Tab / Shift+Tab, mouse wheel, Home / End | Move the selection |
 | Enter, or click | Switch to the window (changes workspace if needed) |
-| Drag a card onto a workspace, or Alt+1..9 | Move the window there without following it |
+| Drag a card (or an app icon in the strip) onto a workspace, or Alt+1..9 | Move the window there without following it |
+| Click an app icon in the strip | Switch to that window |
 | Click a workspace in the strip | Switch to that workspace |
 | Delete, Ctrl+W, or middle-click | Close the window |
 | Type | Search; Backspace, Ctrl+Backspace and Ctrl+U edit the search |

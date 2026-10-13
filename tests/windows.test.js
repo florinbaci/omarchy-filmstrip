@@ -133,7 +133,10 @@ test("workspaceStrip groups ruled and existing workspaces by screen", () => {
   ]
   const existing = [{ id: 9, monitorName: "HDMI-A-1" }, { id: -98, monitorName: "DP-2" }, { id: 5, monitorName: "DP-2" }]
   const monitors = [{ name: "DP-2", x: 1536, activeWorkspaceId: 5 }, { name: "HDMI-A-1", x: 0, activeWorkspaceId: 1 }]
-  const windows = [{ workspaceId: 5, className: "foot" }, { workspaceId: 5, className: "brave" }, { workspaceId: 1, className: "code" }]
+  const windows = [
+    { workspaceId: 5, className: "foot", address: "0xa" }, { workspaceId: 5, className: "brave", address: "0xb" },
+    { workspaceId: 1, className: "code", address: "0xc" }
+  ]
   const strip = W.workspaceStrip(rules, existing, monitors, windows)
   assert.deepEqual(strip.map(g => g.monitor), ["HDMI-A-1", "DP-2"])
   assert.deepEqual(strip[0].slots.map(s => s.id), [1, 2, 9])
@@ -142,6 +145,8 @@ test("workspaceStrip groups ruled and existing workspaces by screen", () => {
   assert.deepEqual(strip[1].slots.map(s => s.id), [5, 3])
   assert.equal(strip[1].slots[1].extra, true)
   assert.deepEqual(strip[1].slots[0].apps, ["foot", "brave"])
+  assert.deepEqual(strip[1].slots[0].windows, [{ address: "0xa", className: "foot" }, { address: "0xb", className: "brave" }])
+  assert.deepEqual(strip[1].slots[1].windows, [])
   assert.equal(strip[0].slots[0].active, true)
   assert.equal(strip[0].slots[1].active, false)
 })

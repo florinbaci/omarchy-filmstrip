@@ -211,17 +211,20 @@ Item {
       existing.push({ id: ws.id, monitorName: ws.monitor ? String(ws.monitor.name || "") : "" })
     }
     var groups = Windows.workspaceStrip(root.workspaceRules, existing, mons, allWindows)
-    // Icon URLs for the apps on each workspace (max 4 shown).
+    // Icons for the windows on each workspace (max 4 shown). Each one can be
+    // dragged to another workspace.
     for (var g = 0; g < groups.length; g++) {
       for (var s = 0; s < groups[g].slots.length; s++) {
         var slot = groups[g].slots[s]
         var icons = []
-        for (var a = 0; a < slot.apps.length && icons.length < 4; a++) {
-          var entry = root.desktopEntry(slot.apps[a])
-          var iconName = entry && entry.icon ? String(entry.icon) : slot.apps[a]
+        for (var a = 0; a < slot.windows.length && icons.length < 4; a++) {
+          var cls = slot.windows[a].className
+          var entry = root.desktopEntry(cls)
+          var iconName = entry && entry.icon ? String(entry.icon) : cls
           icons.push({
             source: String(root.appLibrary ? root.appLibrary.iconSource(iconName) : Quickshell.iconPath(iconName, true)),
-            name: entry ? String(entry.name || "") : root.prettyClass(slot.apps[a])
+            name: entry ? String(entry.name || "") : root.prettyClass(cls),
+            address: slot.windows[a].address
           })
         }
         slot.icons = icons
@@ -276,14 +279,35 @@ Item {
 
   function activate(index) {
     if (index < 0 || index >= windowModel.count) return
-    focusTimer.address = root.normalizeAddress(windowModel.get(index).address)
+    root.focusWindow(windowModel.get(index).address)
+  }
+
+  function focusWindow(address) {
+    var a = root.normalizeAddress(address)
+    if (!a) return
+    focusTimer.address = a
     root.dismiss()
     focusTimer.restart()
   }
 
+  // Start dragging a window: the floating copy follows the pointer from p
+  // (overlay coordinates). Shared by the cards and the strip's icons.
+  function prepareDrag(p, address, appName, icon, workspaceId) {
+    dragProxy.x = p.x - dragProxy.width / 2
+    dragProxy.y = p.y - dragProxy.height / 2
+    dragProxy.appName = appName
+    dragProxy.icon = icon
+    dragProxy.address = address
+    dragProxy.fromWorkspace = workspaceId
+  }
+
   function closeWindow(index) {
     if (index < 0 || index >= windowModel.count) return
-    var a = root.normalizeAddress(windowModel.get(index).address)
+    root.closeAddress(windowModel.get(index).address)
+  }
+
+  function closeAddress(address) {
+    var a = root.normalizeAddress(address)
     if (!a) return
     Quickshell.execDetached(["hyprctl", "eval",
       'hl.dispatch(hl.dsp.window.close({ window = "address:' + a + '" }))'])
@@ -584,6 +608,7 @@ Item {
         required property string badgeShort
         required property real aspect
         required property bool urgent
+        required property int workspaceId
 
         readonly property bool selected: index === root.selectedIndex
         readonly property bool dragged: root.dragAddress === address
@@ -741,12 +766,8 @@ Item {
           onPressed: function(mouse) {
             wasDragged = false
             // Center the floating copy under the pointer before a drag starts.
-            var p = card.mapToItem(overlay, mouse.x, mouse.y)
-            dragProxy.x = p.x - dragProxy.width / 2
-            dragProxy.y = p.y - dragProxy.height / 2
-            dragProxy.appName = card.appName
-            dragProxy.icon = card.icon
-            dragProxy.address = card.address
+            root.prepareDrag(card.mapToItem(overlay, mouse.x, mouse.y),
+              card.address, card.appName, card.icon, card.workspaceId)
           }
           onPositionChanged: function(mouse) {
             if (drag.active) {
@@ -846,7 +867,10 @@ Item {
                   font.bold: true
                 }
 
+                // Above slotMouse, so an icon can be dragged to another
+                // workspace (or clicked to focus that window).
                 Row {
+                  z: 1
                   anchors.right: parent.right
                   anchors.bottom: parent.bottom
                   anchors.rightMargin: Style.space(8)
@@ -856,11 +880,49 @@ Item {
                   Repeater {
                     model: slot.modelData.icons || []
                     delegate: AppIcon {
+                      id: slotIcon
                       required property var modelData
                       width: Style.space(18)
                       height: width
                       source: modelData.source
                       name: modelData.name
+                      opacity: root.dragAddress && root.dragAddress === modelData.address ? 0.35 : 1.0
+                      scale: iconMouse.containsMouse && !root.dragAddress ? 1.25 : 1.0
+
+                      Behavior on scale { NumberAnimation { duration: 100 } }
+
+                      MouseArea {
+                        id: iconMouse
+                        anchors.fill: parent
+                        anchors.margins: -Style.space(2)
+                        hoverEnabled: true
+                        cursorShape: drag.active ? Qt.ClosedHandCursor : Qt.OpenHandCursor
+                        acceptedButtons: Qt.LeftButton | Qt.MiddleButton
+                        drag.target: dragProxy
+                        drag.threshold: Style.space(6)
+                        property bool wasDragged: false
+
+                        onPressed: function(mouse) {
+                          wasDragged = false
+                          root.prepareDrag(slotIcon.mapToItem(overlay, mouse.x, mouse.y),
+                            slotIcon.modelData.address, slotIcon.modelData.name, slotIcon.modelData.source, slot.modelData.id)
+                        }
+                        onPositionChanged: {
+                          if (drag.active && !wasDragged) {
+                            wasDragged = true
+                            root.dragAddress = slotIcon.modelData.address
+                          }
+                        }
+                        onReleased: {
+                          if (wasDragged) dragProxy.Drag.drop()
+                          root.dragAddress = ""
+                        }
+                        onClicked: function(mouse) {
+                          if (wasDragged) return
+                          if (mouse.button === Qt.MiddleButton) root.closeAddress(slotIcon.modelData.address)
+                          else root.focusWindow(slotIcon.modelData.address)
+                        }
+                      }
                     }
                   }
                 }
@@ -882,9 +944,10 @@ Item {
                   anchors.fill: parent
                   keys: ["filmstrip-window"]
                   onDropped: function(dropEvent) {
+                    dropEvent.accept()
+                    if (dragProxy.fromWorkspace === slot.modelData.id) return
                     root.moveToWorkspace(dragProxy.address, slot.modelData.id,
                       slot.modelData.extra ? slot.modelData.monitor : "")
-                    dropEvent.accept()
                   }
                 }
 
@@ -907,6 +970,7 @@ Item {
       property string address: ""
       property string appName: ""
       property string icon: ""
+      property int fromWorkspace: 0
 
       visible: root.dragAddress !== ""
       width: Style.space(200)
@@ -950,7 +1014,7 @@ Item {
       anchors.bottom: parent.bottom
       anchors.bottomMargin: Style.space(24)
       anchors.horizontalCenter: parent.horizontalCenter
-      text: "←→ move  ·  Enter switch  ·  drag onto a workspace or Alt+1–9 to move it there  ·  Del close  ·  type to search  ·  Esc"
+      text: "←→ move  ·  Enter switch  ·  drag a card or a workspace's icon onto a workspace, or Alt+1–9, to move it  ·  Del close  ·  type to search  ·  Esc"
       color: root.muted
       font.family: root.fontFamily
       font.pixelSize: Style.font.caption
