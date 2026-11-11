@@ -74,6 +74,10 @@ function collectWindows(toplevels, monitors) {
     var ipc = ipcOf(t)
     if (ipc.mapped === false) continue
     var ws = workspaceOf(t)
+    // Quickshell can keep a toplevel after its window has closed (seen with
+    // FreeCAD): it keeps its title but has no class and no workspace.
+    // Hyprland workspace ids are never 0, so a window without one is gone.
+    if (ws.id === 0 && !ws.name) continue
     var scratch = isScratchpad(ws)
     if (ipc.hidden === true && !scratch) continue
     var cls = classOf(t)
@@ -282,8 +286,8 @@ function swapWorkspacesLua(fromId, fromAddresses, toId, toAddresses) {
 // Window moves that close the gaps in each screen's workspaces: the occupied
 // workspaces of a screen take that screen's lowest workspace numbers, in
 // order, so empty ones end up last. groups is workspaceStrip's output; extra
-// slots are left alone. Returns [{ address, workspaceId }], only for windows
-// that actually move. Windows never change screen.
+// slots are left alone. Returns [{ address, workspaceId, from }], only for
+// windows that actually move. Windows never change screen.
 function compactMoves(groups) {
   var moves = []
   for (var g = 0; g < (groups || []).length; g++) {
@@ -298,10 +302,29 @@ function compactMoves(groups) {
       if (wins.length === 0) continue
       var target = slots[next++].id
       if (target === slots[k].id) continue
-      for (var w = 0; w < wins.length; w++) moves.push({ address: wins[w].address, workspaceId: target })
+      for (var w = 0; w < wins.length; w++) moves.push({ address: wins[w].address, workspaceId: target, from: slots[k].id })
     }
   }
   return moves
+}
+
+// Screens whose shown workspace is emptied by compactMoves should show where
+// its windows went: [{ monitor, workspaceId }].
+function compactFollows(groups, moves) {
+  var out = []
+  for (var g = 0; g < (groups || []).length; g++) {
+    var active = 0
+    for (var s = 0; s < groups[g].slots.length; s++) {
+      if (groups[g].slots[s].active) active = groups[g].slots[s].id
+    }
+    for (var m = 0; m < (moves || []).length; m++) {
+      if (active > 0 && moves[m].from === active) {
+        out.push({ monitor: groups[g].monitor, workspaceId: moves[m].workspaceId })
+        break
+      }
+    }
+  }
+  return out
 }
 
 // Arrow-key movement in a grid of `count` items laid out in `columns`.
@@ -333,6 +356,7 @@ if (typeof module !== "undefined") {
     workspaceStrip: workspaceStrip,
     swapWorkspacesLua: swapWorkspacesLua,
     compactMoves: compactMoves,
+    compactFollows: compactFollows,
     isScratchpad: isScratchpad,
     aspectOf: aspectOf
   }

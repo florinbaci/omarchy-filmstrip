@@ -199,11 +199,31 @@ test("compactMoves fills gaps per screen and leaves packed screens alone", () =>
   const windows = [win(1, "a"), win(2, "b"), win(3, "c"), win(5, "t"), win(6, "w"), win(8, "b1"), win(8, "b2"), win(9, "b3")]
   const moves = W.compactMoves(W.workspaceStrip(rules, [], monitors, windows))
   assert.deepEqual(moves, [
-    { address: "b1", workspaceId: 7 }, { address: "b2", workspaceId: 7 }, { address: "b3", workspaceId: 8 }
+    { address: "b1", workspaceId: 7, from: 8 }, { address: "b2", workspaceId: 7, from: 8 }, { address: "b3", workspaceId: 8, from: 9 }
   ])
   // Already packed: nothing to do, and the extra "+" slot is never a target.
   const packed = [win(1, "a"), win(2, "b"), win(3, "c"), win(4, "d")]
   assert.deepEqual(W.compactMoves(W.workspaceStrip(rules, [], monitors, packed)), [])
   // Gap at the start of a screen.
-  assert.deepEqual(W.compactMoves(W.workspaceStrip(rules, [], monitors, [win(3, "x")])), [{ address: "x", workspaceId: 1 }])
+  assert.deepEqual(W.compactMoves(W.workspaceStrip(rules, [], monitors, [win(3, "x")])), [{ address: "x", workspaceId: 1, from: 3 }])
+})
+
+test("skips closed windows Quickshell still remembers (no class, no workspace)", () => {
+  const ghost = { address: "g", title: "FreeCAD", lastIpcObject: {} }
+  const rows = W.collectWindows([ghost, toplevel("n", "normal", 3, 0, [0, 0])], MONITORS)
+  assert.deepEqual(rows.map(r => r.address), ["n"])
+})
+
+test("compactFollows moves a screen's view along with its shown workspace", () => {
+  const rules = [5, 6, 7, 8].map(n => ({ workspaceString: String(n), monitor: "DP-2" }))
+  const win = (ws, address) => ({ workspaceId: ws, className: "app", address })
+  const windows = [win(5, "t"), win(7, "b")]
+  // Looking at 7 when 6 empties: 7's window goes to 6, and so does the view.
+  let groups = W.workspaceStrip(rules, [], [{ name: "DP-2", x: 0, activeWorkspaceId: 7 }], windows)
+  let moves = W.compactMoves(groups)
+  assert.deepEqual(W.compactFollows(groups, moves), [{ monitor: "DP-2", workspaceId: 6 }])
+  // Looking at 5, which doesn't move: the view stays.
+  groups = W.workspaceStrip(rules, [], [{ name: "DP-2", x: 0, activeWorkspaceId: 5 }], windows)
+  moves = W.compactMoves(groups)
+  assert.deepEqual(W.compactFollows(groups, moves), [])
 })

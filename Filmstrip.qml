@@ -36,7 +36,8 @@ Item {
   // Workspace tile being dragged (to swap with another), 0 when not dragging.
   property int dragWorkspace: 0
   readonly property bool dragging: root.dragAddress !== "" || root.dragWorkspace > 0
-  // Set by a move or swap: once it has landed, close the gaps it left.
+  // Set by a move, swap or closed window: once it has landed, close the gaps
+  // it left.
   property bool compactPending: false
 
   property color background: Color.menu.background
@@ -199,7 +200,8 @@ Item {
     Qt.callLater(root.scrollToSelection)
   }
 
-  function rebuildStrip(allWindows) {
+  // Workspaces grouped by screen, as Windows.workspaceStrip builds them.
+  function stripGroups(allWindows) {
     var mons = []
     var monValues = Hyprland.monitors ? (Hyprland.monitors.values || []) : []
     var positions = root.monitorList()
@@ -215,7 +217,11 @@ Item {
       var ws = wsValues[j]
       existing.push({ id: ws.id, monitorName: ws.monitor ? String(ws.monitor.name || "") : "" })
     }
-    var groups = Windows.workspaceStrip(root.workspaceRules, existing, mons, allWindows)
+    return Windows.workspaceStrip(root.workspaceRules, existing, mons, allWindows)
+  }
+
+  function rebuildStrip(allWindows) {
+    var groups = root.stripGroups(allWindows)
     // Icons for the windows on each workspace (max 4 shown). Each one can be
     // dragged to another workspace.
     for (var g = 0; g < groups.length; g++) {
@@ -366,17 +372,32 @@ Item {
     moveRefresh.restart()
   }
 
-  // Close gaps in each screen's workspaces left by a move or swap: windows on
-  // later workspaces shift down, so the empty ones end up last.
+  // Close gaps in each screen's workspaces left by a move, swap or closed
+  // window: windows on later workspaces shift down, so the empty ones end up
+  // last. Runs while Filmstrip is hidden too, from fresh window data.
   function compactWorkspaces() {
     root.compactPending = false
-    var moves = Windows.compactMoves(root.workspaceGroups)
+    if (root.dragging) return
+    var groups = root.stripGroups(Windows.collectWindows(Hyprland.toplevels, root.monitorList()))
+    var moves = Windows.compactMoves(groups)
     if (moves.length === 0) return
     var parts = []
     for (var i = 0; i < moves.length; i++) {
       var a = root.normalizeAddress(moves[i].address)
       if (a) parts.push('hl.dispatch(hl.dsp.window.move({ workspace = "' + moves[i].workspaceId + '", follow = false, window = "address:' + a + '" }))')
     }
+    // A screen showing a workspace whose windows moved shows them where they
+    // went. The focused screen goes last so focus stays on it.
+    var focusedName = Hyprland.focusedMonitor ? String(Hyprland.focusedMonitor.name || "") : ""
+    var follows = Windows.compactFollows(groups, moves)
+    var focusedTarget = 0
+    for (var f = 0; f < follows.length; f++) {
+      if (follows[f].monitor === focusedName) focusedTarget = follows[f].workspaceId
+      else parts.push('hl.dispatch(hl.dsp.focus({ workspace = "' + follows[f].workspaceId + '" }))')
+    }
+    if (!focusedTarget && follows.length > 0 && Hyprland.focusedMonitor && Hyprland.focusedMonitor.activeWorkspace)
+      focusedTarget = Hyprland.focusedMonitor.activeWorkspace.id
+    if (focusedTarget > 0) parts.push('hl.dispatch(hl.dsp.focus({ workspace = "' + focusedTarget + '" }))')
     Quickshell.execDetached(["hyprctl", "eval", parts.join("; ")])
     moveRefresh.restart()
   }
@@ -429,8 +450,7 @@ Item {
     id: settleTimer
     interval: 250
     onTriggered: {
-      if (!root.opened) return
-      root.rebuild(!root.userMoved && !root.filterText)
+      if (root.opened) root.rebuild(!root.userMoved && !root.filterText)
       if (root.compactPending) root.compactWorkspaces()
     }
   }
@@ -483,6 +503,20 @@ Item {
       address = ""
     }
   }
+
+  // A closed window can leave an empty workspace between used ones; close
+  // that gap whether or not Filmstrip is open.
+  Connections {
+    target: Hyprland
+    function onRawEvent(event) {
+      if (event.name !== "closewindow") return
+      root.compactPending = true
+      moveRefresh.restart()
+    }
+  }
+
+  // The gap closing needs the workspace rules even before the first open.
+  Component.onCompleted: rulesQuery.running = true
 
   // Closed windows disappear from the grid while it is open.
   Connections {

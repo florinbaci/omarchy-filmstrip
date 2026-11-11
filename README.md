@@ -27,9 +27,11 @@ onto a workspace to move it there without leaving where you are.
   swap their windows (across screens too). Drag a single app icon from one
   tile to another to move just that window. Click an icon to switch to that
   window, middle-click to close it.
-- **No gaps.** After a move or swap, each screen's workspaces are packed: if
-  one is left empty between used ones, the windows after it shift down to fill
-  it, so the empty workspaces end up last. Windows never change screen.
+- **No gaps.** When a window closes (even with Filmstrip hidden) or after a
+  move or swap, each screen's workspaces are packed: if one is left empty
+  between used ones, the windows after it shift down to fill it, so the empty
+  workspaces end up last. If you were looking at a workspace that shifted, the
+  screen follows it. Windows never change screen.
 - **Search as you type** by app, title or workspace (`ws3`). Every word has to match.
 - Follows the active Omarchy theme and fonts.
 
